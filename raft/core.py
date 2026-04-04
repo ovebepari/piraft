@@ -144,7 +144,72 @@ class RaftNode:
 
                     else:
                         # Log consistency check failed, decrement and retry
-                        self.next_index[peer_id] = max(0, self.next_index[peer_id] - 1
+                        self.next_index[peer_id] = max(0, self.next_index[peer_id] - 1)
 
                     time.sleep(0.05) # Heartbeat Interval
 
+    def handle_append_entries(self, args):
+        """
+        RECEIVER: Handles incoming log entries and heatbeats
+        """
+        with self.lock:
+            # 1. Reply false if term < currentTerm
+            if args['term'] < self.current_term:
+                return {'term': self.current_term, 'success': False}
+
+            self.last_heartbeat = time.time()
+
+            if args['term'] > self.current_term:
+                self._step_down(args['term'])
+
+            self.state = RaftState.FOLLOWER
+
+            # 2. Consistency Check: prevLogIndex/prevLogTerm
+            log_len = len(self.log)
+            if args['prevLogIndex'] >= log_len:
+                return {'term': self.current_term, 'success': False}
+
+            if args['prevLogIndex'] >= 0 \
+                and self.log[args['prevLogIndex']['term'] != args['prevLogTerm']:
+                return {'term':self.current_term, 'success': False}
+
+            # 3. Append entries, resolve conflicts
+            new_idx = args['prevILogIndex'] + 1
+            for i, entry in enumerate(args['entries']):
+                if nex_idx + i < len(self.log):
+                    if self.log[new_idx+i]['term'] != entry['term']:
+                        self.log = slef.log[:new_idx+i] # truncate conflict
+                        self.log.append(entry)
+                else:
+                    self.log.append(entry)
+            if args['entries']:
+                self.storage.save_state(self.currnet_term, self.voted_for, self.log)
+
+            # 4. Update Commit Index
+            if args['leaderCommit'] > self.commit_index:
+                self.commit_index = min(args['leaderCommit'], len(self.log) -1)
+
+            return {'term': self.current_term, 'success': True}
+
+    def _update_commit_index(self):
+        """
+        Leader only: Find largest N such that a majority of match_index[i] >= N
+        """
+        for n in range(len(self.log)-1, self.commit_index, -1):
+            if self.log[n]['term'] != self.current_term: continue
+
+            count = 1 #self
+            for peer in self.peers:
+                if self.match_index[peer] >= n:
+                    count += 1
+
+            if count > (len(self.peers)+1) // 2:
+                self.commit_index = n
+                logging.info(f"Leader commited up to index {n}")
+                break
+
+    def _step_down(self, new_term):
+        self.current_term = new_term
+        self.state = RaftState.FOLLOWER
+        self.voted_for = None
+        self.storage.save_state(self.current_term, self.voted_for)
