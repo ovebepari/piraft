@@ -10,9 +10,6 @@ Run three nodes and they will start competing for leadership!
 
 ## Directory Structure
 ```
-=======
-## Directory Structure
-
 piraft/
 ├── raft/
 │   ├── __init__.py
@@ -23,4 +20,4 @@ piraft/
 │   └── test_election.py
 ├── main.py           # CLI entry point
 └── README.md
-
+```
