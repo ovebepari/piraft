@@ -14,13 +14,16 @@ class Storage:
     def save_state(self, term, voted_for, log=None):
         data = {
             "term": term,
-            "voted_for": voted_for, 
-            "log": log if log in not None else self.get_log()
+            "voted_for": voted_for,
+            "log": log if log is not None else self.get_log()
         }
         with open(self.filename, 'w') as f:
             json.dump(data, f)
 
     def get_term(self):
+        return self._read()["term"]
+
+    def get_voted_for(self):
         return self._read()["voted_for"]
 
     def get_log(self):
