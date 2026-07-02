@@ -2,6 +2,7 @@ import threading
 import time
 import random
 import logging
+import queue
 from enum import Enum, auto
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -45,8 +46,10 @@ class RaftNode:
         self.match_index = {}
 
         # Background threads
+        self.commit_queue = queue.Queue()
         self.running = True
         threading.Thread(target=self._run_election_timer, daemon=True).start()
+        threading.Thread(target=self._run_apply_worker, daemon=True).start()
 
     def _run_election_timer(self):
         while self.running:
@@ -238,3 +241,36 @@ class RaftNode:
         self.state = RaftState.FOLLOWER
         self.voted_for = None
         self.storage.save_state(self.current_term, self.voted_for)
+
+    def propose(self, command):
+        """
+        Submits a command to the log.
+        Returns: (is_leader, index, term)
+        """
+        with self.lock:
+            if self.state != RaftState.LEADER:
+                return False, -1, self.current_term
+            
+            entry = {'term': self.current_term, 'command': command}
+            self.log.append(entry)
+            index = len(self.log) - 1
+            self.storage.save_state(self.current_term, self.voted_for, self.log)
+            logging.info(f"Leader proposed index {index} in term {self.current_term}")
+            return True, index, self.current_term
+
+    def _run_apply_worker(self):
+        """
+        Monitors commit_index and pushes committed entries to the commit_queue.
+        """
+        while self.running:
+            time.sleep(0.01)
+            to_apply = []
+            with self.lock:
+                while self.commit_index > self.last_applied:
+                    self.last_applied += 1
+                    entry = self.log[self.last_applied].copy()
+                    entry['index'] = self.last_applied
+                    to_apply.append(entry)
+            
+            for entry in to_apply:
+                self.commit_queue.put(entry)

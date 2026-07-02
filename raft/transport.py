@@ -43,6 +43,7 @@ class TransportServer:
     def __init__(self, raft_node, port):
         self.raft_node = raft_node
         self.port = port
+        self.running = True
         self.server_thread = threading.Thread(target=self._listen, daemon=True)
 
     def start(self):
@@ -50,11 +51,23 @@ class TransportServer:
 
     def _listen(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             s.bind(('localhost', self.port))
             s.listen()
-            while True:
-                conn, addr = s.accept()
-                threading.Thread(target=self._handle_conn, args=(conn,)).start()
+            s.settimeout(1.0)
+            while self.running:
+                try:
+                    conn, addr = s.accept()
+                    threading.Thread(target=self._handle_conn, args=(conn,)).start()
+                except socket.timeout:
+                    continue
+                except Exception:
+                    break
+
+    def stop(self):
+        self.running = False
+        if self.server_thread.is_alive():
+            self.server_thread.join(timeout=1.0)
 
     def _handle_conn(self, conn):
         with conn:
