@@ -38,7 +38,7 @@ class RaftNode:
         
         # Election Timer logic
         self.last_heartbeat = time.time()
-        self.election_timeout = random.uniform(0.15, 0.3)
+        self.election_timeout = random.uniform(0.5, 0.7)
         
         # Leader-specific volatile state (reinitialized after election)
         self.next_index = {}
