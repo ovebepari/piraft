@@ -30,8 +30,8 @@ class RaftNode:
         self.log = self.storage.get_log() # List of dicts: {'term': T, 'command': C}
 
         # Volatile state
-        self.commit_index = 0
-        self.last_applied = 0
+        self.commit_index = -1
+        self.last_applied = -1
         self.state = RaftState.FOLLOWER
         
         # Concurrency: Mutex to protect state transitions and log access
@@ -39,7 +39,7 @@ class RaftNode:
         
         # Election Timer logic
         self.last_heartbeat = time.time()
-        self.election_timeout = random.uniform(0.5, 0.7)
+        self.election_timeout = random.uniform(1.0, 2.0)
         
         # Leader-specific volatile state (reinitialized after election)
         self.next_index = {}
@@ -180,12 +180,12 @@ class RaftNode:
                 if response['success']:
                     self.next_index[peer_id] = prev_idx + len(entries) + 1
                     self.match_index[peer_id] = prev_idx + len(entries)
+                    logging.info(f"Match index for {peer_id} updated to {self.match_index[peer_id]}")
                     self._update_commit_index()
                 else:
                     # Log consistency check failed, decrement and retry
                     self.next_index[peer_id] = max(0, self.next_index[peer_id] - 1)
-
-            time.sleep(0.05)
+            time.sleep(0.1)
 
     def handle_append_entries(self, args):
         with self.lock:
@@ -220,21 +220,25 @@ class RaftNode:
             if args['leaderCommit'] > self.commit_index:
                 self.commit_index = min(args['leaderCommit'], len(self.log) - 1)
 
+            # Tiny delay to ensure storage writes and consistency
+            time.sleep(0.01)
             return {'term': self.current_term, 'success': True}
 
     def _update_commit_index(self):
+        # Raft Figure 2: If there exists an N > commitIndex, a majority of matchIndex[i] >= N, 
+        # and log[N].term == currentTerm: set commitIndex = N
         for n in range(len(self.log) - 1, self.commit_index, -1):
-            if self.log[n]['term'] != self.current_term: continue
-            
-            count = 1
+            count = 1 # Leader itself matches its log
             for peer in self.peers:
-                if self.match_index[peer] >= n:
+                if self.match_index.get(peer, -1) >= n:
                     count += 1
             
             if count > (len(self.peers) + 1) // 2:
-                self.commit_index = n
-                logging.info(f"Leader committed up to index {n}")
-                break
+                # Raft safety: only commit if at least one entry from current term is committed
+                if self.log[n]['term'] == self.current_term:
+                    self.commit_index = n
+                    logging.info(f"Leader committed up to index {n}")
+                    break
 
     def _step_down(self, new_term):
         self.current_term = new_term

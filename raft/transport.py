@@ -43,7 +43,7 @@ class Transport:
             processed_args['entries'] = serializable_entries
 
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(0.1) # Don't block the consensus module forever
+            s.settimeout(0.5) # Allow more time for processing
             s.connect(('localhost', port))
             payload = json.dumps({"method": method, "args": processed_args})
             s.sendall(payload.encode())
